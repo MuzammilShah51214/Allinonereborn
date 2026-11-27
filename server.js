@@ -18,16 +18,17 @@ const CACHE_TTL_MS = 8 * 60 * 1000;
 const streamCache = new Map();
 
 const CHANNELS = {
-    'k7x9p2m': { name: 'ARY News',     type: 'ary',     url: 'https://live.arynews.tv/',                                           referer: 'https://live.arynews.tv/' },
-    'q3n8z1v': { name: 'ARY News 2',   type: 'ary',     url: 'https://live.arynews.tv/',                                           referer: 'https://live.arynews.tv/' },
-    'w5r2y9t': { name: 'ARY Musik',    type: 'ary',     url: 'https://live.arymusik.tv/',                                          referer: 'https://live.arymusik.tv/' },
-    'a8f4h6j': { name: 'ARY Digital',  type: 'ary',     url: 'https://live.arydigital.tv/',                                        referer: 'https://live.arydigital.tv/' },
-    'b2c7d9e': { name: 'ARY Zindagi',  type: 'ary',     url: 'https://live.aryzindagi.tv/',                                        referer: 'https://live.aryzindagi.tv/' },
-    'm4k8n2p': { name: 'ARY Qtv',      type: 'ary',     url: 'https://live.aryqtv.tv/',                                            referer: 'https://live.aryqtv.tv/' },
-    's9p4x7w': { name: 'Sony Pal',     type: 'suniliv', channelId: 'sony-pal', jsonUrl: 'https://suniliv.pages.dev/sliv3.json',      referer: 'https://suniliv.pages.dev/' },
-    'h4s8t2m': { name: 'Hum Sitaray',  type: 'tamasha', slug: 'hum-sitaray-live', url: 'https://tamashaweb.com/live-tv?channel=hum-sitaray-live', referer: 'https://tamashaweb.com/' },
-    'm7v2c9x': { name: 'MunTV',        type: 'myco',    videoId: '683074438dfcfbbcde5c20d6', url: 'https://myco.io/videohome/683074438dfcfbbcde5c20d6', referer: 'https://myco.io/' },
-    'g9s5p3r': { name: 'Geo Super',    type: 'myco',    videoId: '68a0d66883214baa498339b5', url: 'https://myco.io/videohome/68a0d66883214baa498339b5', referer: 'https://myco.io/' }
+    'k7x9p2m': { name: 'ARY News',                 type: 'ary',      url: 'https://live.arynews.tv/',                                                                                                                               referer: 'https://live.arynews.tv/' },
+    'q3n8z1v': { name: 'ARY News 2',               type: 'ary',      url: 'https://live.arynews.tv/',                                                                                                                               referer: 'https://live.arynews.tv/' },
+    'w5r2y9t': { name: 'ARY Musik',                type: 'ary',      url: 'https://live.arymusik.tv/',                                                                                                                              referer: 'https://live.arymusik.tv/' },
+    'a8f4h6j': { name: 'ARY Digital',              type: 'ary',      url: 'https://live.arydigital.tv/',                                                                                                                            referer: 'https://live.arydigital.tv/' },
+    'b2c7d9e': { name: 'ARY Zindagi',              type: 'ary',      url: 'https://live.aryzindagi.tv/',                                                                                                                            referer: 'https://live.aryzindagi.tv/' },
+    'm4k8n2p': { name: 'ARY Qtv',                  type: 'ary',      url: 'https://live.aryqtv.tv/',                                                                                                                                referer: 'https://live.aryqtv.tv/' },
+    's9p4x7w': { name: 'Sony Pal',                 type: 'suniliv',  channelId: 'sony-pal', jsonUrl: 'https://suniliv.pages.dev/sliv3.json',                                                                                          referer: 'https://suniliv.pages.dev/' },
+    'h4s8t2m': { name: 'Hum Sitaray',              type: 'tamasha',  slug: 'hum-sitaray-live', url: 'https://tamashaweb.com/live-tv?channel=hum-sitaray-live',                                                                        referer: 'https://tamashaweb.com/' },
+    'm7v2c9x': { name: 'MunTV',                    type: 'myco',     videoId: '683074438dfcfbbcde5c20d6', url: 'https://myco.io/videohome/683074438dfcfbbcde5c20d6',                                                                   referer: 'https://myco.io/' },
+    'g9s5p3r': { name: 'Geo Super',                type: 'myco',     videoId: '68a0d66883214baa498339b5', url: 'https://myco.io/videohome/68a0d66883214baa498339b5',                                                                   referer: 'https://myco.io/' },
+    'm9j4t8k': { name: 'The Legend of Maula Jatt', type: 'moviebox', url: 'https://moviebox01.com/movies/the-legend-of-maula-jatt-punjabi-cam-I8xcxwBGBP5?id=4895116866336817808&type=/movie/detail&detailSe=&detailEp=&lang=en&utm_source=appShare', referer: 'https://moviebox01.com/' }
 };
 
 function getCachedStream(channelKey) {
@@ -111,9 +112,23 @@ async function fetchSunilivStream(channel) {
     return null;
 }
 
+function isMediaUrl(url, allowMp4 = false) {
+    if (!url || url.includes('stream_proxy.php')) return false;
+    const lower = url.toLowerCase();
+    if (lower.includes('.m3u8') || lower.includes('m3u8')) return true;
+    if (allowMp4 && (lower.includes('.mp4') || lower.includes('mime=video'))) return true;
+    return false;
+}
+
 function scoreStreamUrl(url, channel, clickedTargetChannel = false) {
     const lower = url.toLowerCase();
     let score = 0;
+
+    if (lower.includes('.m3u8')) {
+        score += 30;
+    } else if (lower.includes('.mp4')) {
+        score += 10;
+    }
 
     if (channel.type === 'tamasha') {
         if (lower.includes('hum-sitaray') || lower.includes('humsitaray') || lower.includes('sitaray')) {
@@ -136,6 +151,12 @@ function scoreStreamUrl(url, channel, clickedTargetChannel = false) {
         }
         if (lower.includes('myco')) {
             score += 25;
+        }
+    }
+
+    if (channel.type === 'moviebox') {
+        if (lower.includes('maula') || lower.includes('jatt') || lower.includes('moviebox')) {
+            score += 50;
         }
     }
 
@@ -184,6 +205,27 @@ async function selectTamashaChannel(page) {
     }
 }
 
+async function clickMovieBoxPlay(page) {
+    try {
+        return await page.evaluate(() => {
+            const playWords = ['play', 'watch now', 'watch', 'stream'];
+            const els = Array.from(document.querySelectorAll('button, a, [role="button"], [class*="play"], [class*="watch"]'));
+            for (const el of els) {
+                const text = (el.innerText || el.textContent || '').trim().toLowerCase();
+                const cls = (el.className || '').toString().toLowerCase();
+                if (playWords.some((w) => text === w || text.includes(w) || cls.includes('play'))) {
+                    el.scrollIntoView({ block: 'center' });
+                    el.click();
+                    return true;
+                }
+            }
+            return false;
+        });
+    } catch (e) {
+        return false;
+    }
+}
+
 async function fetchFreshUrl(channelKey) {
     const channel = CHANNELS[channelKey];
     if (!channel) return null;
@@ -194,6 +236,7 @@ async function fetchFreshUrl(channelKey) {
     }
 
     console.log(`🔍 Fetching fresh URL for ${channel.name}...`);
+    const allowMp4 = channel.type === 'moviebox';
 
     let browser;
     try {
@@ -218,32 +261,30 @@ async function fetchFreshUrl(channelKey) {
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
         );
 
-        let bestM3u8Url = null;
+        let bestMediaUrl = null;
         let bestScore = -1;
-        let m3u8Referer = channel.referer;
+        let mediaReferer = channel.referer;
         let allUrls = [];
         let clickedTargetChannel = false;
 
-        const captureM3u8 = (url, headers = {}) => {
-            if (!url || url.includes('stream_proxy.php')) return;
-            if (url.includes('.m3u8') || url.includes('m3u8')) {
-                allUrls.push(url);
-                const reqReferer = headers['referer'] || headers['Referer'] || channel.referer;
-                const score = scoreStreamUrl(url, channel, clickedTargetChannel);
+        const captureMedia = (url, headers = {}) => {
+            if (!isMediaUrl(url, allowMp4)) return;
+            allUrls.push(url);
+            const reqReferer = headers['referer'] || headers['Referer'] || channel.referer;
+            const score = scoreStreamUrl(url, channel, clickedTargetChannel);
 
-                if (score >= bestScore) {
-                    bestScore = score;
-                    bestM3u8Url = url;
-                    m3u8Referer = reqReferer;
-                }
+            if (score >= bestScore) {
+                bestScore = score;
+                bestMediaUrl = url;
+                mediaReferer = reqReferer;
             }
         };
 
-        page.on('request', (req) => captureM3u8(req.url(), req.headers()));
-        page.on('response', (res) => captureM3u8(res.url(), res.request().headers()));
+        page.on('request', (req) => captureMedia(req.url(), req.headers()));
+        page.on('response', (res) => captureMedia(res.url(), res.request().headers()));
         page.on('frameattached', (frame) => {
-            frame.on('request', (req) => captureM3u8(req.url(), req.headers()));
-            frame.on('response', (res) => captureM3u8(res.url(), res.request().headers()));
+            frame.on('request', (req) => captureMedia(req.url(), req.headers()));
+            frame.on('response', (res) => captureMedia(res.url(), res.request().headers()));
         });
 
         console.log(`🌐 Opening ${channel.url}...`);
@@ -259,6 +300,14 @@ async function fetchFreshUrl(channelKey) {
             if (clickedTargetChannel) {
                 console.log(`🎯 Clicked Hum Sitaray element on Tamasha`);
                 await new Promise((r) => setTimeout(r, 1500));
+            }
+        }
+
+        if (channel.type === 'moviebox') {
+            const clickedPlay = await clickMovieBoxPlay(page);
+            if (clickedPlay) {
+                console.log(`🎬 Clicked Play button on MovieBox`);
+                await new Promise((r) => setTimeout(r, 2000));
             }
         }
 
@@ -294,20 +343,22 @@ async function fetchFreshUrl(channelKey) {
         const findStreamInFrames = async () => {
             for (const frame of page.frames()) {
                 try {
-                    const found = await frame.evaluate(() => {
+                    const found = await frame.evaluate((mp4Allowed) => {
                         const video = document.querySelector('video');
                         if (video && (video.currentSrc || video.src)) {
                             const src = video.currentSrc || video.src;
-                            if (src.includes('.m3u8')) return src;
+                            if (src.includes('.m3u8') || (mp4Allowed && src.includes('.mp4'))) return src;
                         }
                         const source = document.querySelector('video source[src]');
-                        if (source && source.src && source.src.includes('.m3u8')) {
-                            return source.src;
+                        if (source && source.src) {
+                            if (source.src.includes('.m3u8') || (mp4Allowed && source.src.includes('.mp4'))) {
+                                return source.src;
+                            }
                         }
                         return null;
-                    });
-                    if (found && found.includes('.m3u8')) {
-                        captureM3u8(found);
+                    }, allowMp4);
+                    if (found) {
+                        captureMedia(found);
                     }
                 } catch (e) {}
             }
@@ -315,7 +366,7 @@ async function fetchFreshUrl(channelKey) {
 
         await triggerPlayInAllFrames();
 
-        console.log(`⏳ Waiting up to 22s for m3u8 URL...`);
+        console.log(`⏳ Waiting up to 22s for stream URL...`);
         let foundAtSecond = null;
 
         for (let i = 0; i < 22; i++) {
@@ -326,11 +377,15 @@ async function fetchFreshUrl(channelKey) {
                 clickedTargetChannel = await selectTamashaChannel(page);
             }
 
-            if (bestM3u8Url && foundAtSecond === null) {
+            if (channel.type === 'moviebox' && i === 4) {
+                await clickMovieBoxPlay(page);
+            }
+
+            if (bestMediaUrl && foundAtSecond === null) {
                 foundAtSecond = i;
             }
 
-            if (bestM3u8Url) {
+            if (bestMediaUrl) {
                 if (channel.type === 'tamasha' && bestScore < 100 && (i - foundAtSecond) < 8) {
                     continue;
                 }
@@ -342,12 +397,12 @@ async function fetchFreshUrl(channelKey) {
             }
         }
 
-        if (bestM3u8Url) {
-            console.log(`✅ Got URL for ${channel.name} (score ${bestScore}): ${bestM3u8Url.substring(0, 120)}...`);
-            return { url: bestM3u8Url, referer: m3u8Referer || channel.referer };
+        if (bestMediaUrl) {
+            console.log(`✅ Got URL for ${channel.name} (score ${bestScore}): ${bestMediaUrl.substring(0, 120)}...`);
+            return { url: bestMediaUrl, referer: mediaReferer || channel.referer };
         }
 
-        console.log(`❌ No m3u8 URL for ${channel.name}. Captured: ${allUrls.length}`);
+        console.log(`❌ No stream URL for ${channel.name}. Captured: ${allUrls.length}`);
         return null;
     } catch (err) {
         console.error(`❌ Error for ${channel.name}: ${err.message}`);
@@ -452,6 +507,13 @@ app.get('/:code', async (req, res, next) => {
         });
     }
 
+    // Agar direct MP4 link mila ho (e.g. MovieBox) to /proxy par redirect kar dein
+    if (streamObj.url.toLowerCase().includes('.mp4') && !streamObj.url.toLowerCase().includes('.m3u8')) {
+        const proxyBase = getBaseProxyUrl(req);
+        const referer = streamObj.referer || channel.referer;
+        return res.redirect(`${proxyBase}?url=${encodeURIComponent(streamObj.url)}&referer=${encodeURIComponent(referer)}&key=${SECRET_KEY}`);
+    }
+
     try {
         let fetched;
         try {
@@ -505,26 +567,50 @@ app.get('/proxy', async (req, res) => {
     }
 
     const targetUrl = req.query.url;
-    const referer = req.query.referer || 'https://myco.io/';
+    const referer = req.query.referer || 'https://moviebox01.com/';
 
     if (!targetUrl) return res.status(400).json({ error: 'url required' });
 
     try {
+        const reqHeaders = {
+            'Referer': referer,
+            'Origin': new URL(referer).origin,
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': '*/*'
+        };
+
+        if (req.headers.range) {
+            reqHeaders['Range'] = req.headers.range;
+        }
+
+        const isDirectVideo = targetUrl.toLowerCase().includes('.mp4');
+
         const response = await axios.get(targetUrl, {
-            headers: {
-                'Referer': referer,
-                'Origin': new URL(referer).origin,
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Accept': '*/*'
-            },
-            responseType: 'arraybuffer',
-            timeout: 25000,
-            maxRedirects: 5
+            headers: reqHeaders,
+            responseType: isDirectVideo ? 'stream' : 'arraybuffer',
+            timeout: 30000,
+            maxRedirects: 5,
+            validateStatus: (status) => status >= 200 && status < 400
         });
 
         const contentType = response.headers['content-type'] || 'application/octet-stream';
+        res.status(response.status);
         res.set('Content-Type', contentType);
         res.set('Access-Control-Allow-Origin', '*');
+
+        if (response.headers['content-length']) {
+            res.set('Content-Length', response.headers['content-length']);
+        }
+        if (response.headers['content-range']) {
+            res.set('Content-Range', response.headers['content-range']);
+        }
+        if (response.headers['accept-ranges']) {
+            res.set('Accept-Ranges', response.headers['accept-ranges']);
+        }
+
+        if (isDirectVideo) {
+            return response.data.pipe(res);
+        }
 
         let data = response.data;
 
