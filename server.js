@@ -18,14 +18,15 @@ const CACHE_TTL_MS = 8 * 60 * 1000;
 const streamCache = new Map();
 
 const CHANNELS = {
-    'k7x9p2m': { name: 'ARY News',     type: 'ary',     url: 'https://live.arynews.tv/',                            referer: 'https://live.arynews.tv/' },
-    'q3n8z1v': { name: 'ARY News 2',   type: 'ary',     url: 'https://live.arynews.tv/',                            referer: 'https://live.arynews.tv/' },
-    'w5r2y9t': { name: 'ARY Musik',    type: 'ary',     url: 'https://live.arymusik.tv/',                           referer: 'https://live.arymusik.tv/' },
-    'a8f4h6j': { name: 'ARY Digital',  type: 'ary',     url: 'https://live.arydigital.tv/',                         referer: 'https://live.arydigital.tv/' },
-    'b2c7d9e': { name: 'ARY Zindagi',  type: 'ary',     url: 'https://live.aryzindagi.tv/',                         referer: 'https://live.aryzindagi.tv/' },
-    'm4k8n2p': { name: 'ARY Qtv',      type: 'ary',     url: 'https://live.aryqtv.tv/',                             referer: 'https://live.aryqtv.tv/' },
-    's9p4x7w': { name: 'Sony Pal',     type: 'suniliv', channelId: 'sony-pal', jsonUrl: 'https://suniliv.pages.dev/sliv3.json', referer: 'https://suniliv.pages.dev/' },
-    'h4s8t2m': { name: 'Hum Sitaray',  type: 'tamasha', slug: 'hum-sitaray-live', url: 'https://tamashaweb.com/live-tv?channel=hum-sitaray-live', referer: 'https://tamashaweb.com/' }
+    'k7x9p2m': { name: 'ARY News',     type: 'ary',     url: 'https://live.arynews.tv/',                                       referer: 'https://live.arynews.tv/' },
+    'q3n8z1v': { name: 'ARY News 2',   type: 'ary',     url: 'https://live.arynews.tv/',                                       referer: 'https://live.arynews.tv/' },
+    'w5r2y9t': { name: 'ARY Musik',    type: 'ary',     url: 'https://live.arymusik.tv/',                                      referer: 'https://live.arymusik.tv/' },
+    'a8f4h6j': { name: 'ARY Digital',  type: 'ary',     url: 'https://live.arydigital.tv/',                                    referer: 'https://live.arydigital.tv/' },
+    'b2c7d9e': { name: 'ARY Zindagi',  type: 'ary',     url: 'https://live.aryzindagi.tv/',                                    referer: 'https://live.aryzindagi.tv/' },
+    'm4k8n2p': { name: 'ARY Qtv',      type: 'ary',     url: 'https://live.aryqtv.tv/',                                        referer: 'https://live.aryqtv.tv/' },
+    's9p4x7w': { name: 'Sony Pal',     type: 'suniliv', channelId: 'sony-pal', jsonUrl: 'https://suniliv.pages.dev/sliv3.json',  referer: 'https://suniliv.pages.dev/' },
+    'h4s8t2m': { name: 'Hum Sitaray',  type: 'tamasha', slug: 'hum-sitaray-live', url: 'https://tamashaweb.com/live-tv?channel=hum-sitaray-live', referer: 'https://tamashaweb.com/' },
+    'm7v2c9x': { name: 'MunTV',        type: 'myco',    videoId: '683074438dfcfbbcde5c20d6', url: 'https://myco.io/videohome/683074438dfcfbbcde5c20d6', referer: 'https://myco.io/' }
 };
 
 function getCachedStream(channelKey) {
@@ -121,6 +122,18 @@ function scoreStreamUrl(url, channel, clickedTargetChannel = false) {
             score += 40;
         }
         if (clickedTargetChannel) {
+            score += 25;
+        }
+    }
+
+    if (channel.type === 'myco') {
+        if (channel.videoId && lower.includes(channel.videoId.toLowerCase())) {
+            score += 100;
+        }
+        if (lower.includes('muntv') || lower.includes('mun-tv') || lower.includes('mun')) {
+            score += 60;
+        }
+        if (lower.includes('myco')) {
             score += 25;
         }
     }
@@ -491,7 +504,7 @@ app.get('/proxy', async (req, res) => {
     }
 
     const targetUrl = req.query.url;
-    const referer = req.query.referer || 'https://tamashaweb.com/';
+    const referer = req.query.referer || 'https://myco.io/';
 
     if (!targetUrl) return res.status(400).json({ error: 'url required' });
 
