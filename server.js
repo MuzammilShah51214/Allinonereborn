@@ -14,13 +14,13 @@ const PORT = process.env.PORT || 3000;
 const SECRET_KEY = 'MUZAMMIL2026ARY';
 
 const CHANNELS = {
-    'k7x9p2m': { name: 'ARY News',    url: 'https://live.arynews.tv/',                        referer: 'https://live.arynews.tv/' },
-    'q3n8z1v': { name: 'ARY News 2',  url: 'https://live.arynews.tv/',                        referer: 'https://live.arynews.tv/' },
-    'w5r2y9t': { name: 'ARY Musik',   url: 'https://live.arymusik.tv/',                       referer: 'https://live.arymusik.tv/' },
-    'a8f4h6j': { name: 'ARY Digital', url: 'https://live.arydigital.tv/',                     referer: 'https://live.arydigital.tv/' },
-    'b2c7d9e': { name: 'ARY Zindagi', url: 'https://live.aryzindagi.tv/',                     referer: 'https://live.aryzindagi.tv/' },
-    'm4k8n2p': { name: 'ARY Qtv',     url: 'https://live.aryqtv.tv/',                         referer: 'https://live.aryqtv.tv/' },
-    's9p4x7w': { name: 'Sony Pal',    url: 'https://suniliv.pages.dev/pworld?id=sony-pal',     referer: 'https://suniliv.pages.dev/' }
+    'k7x9p2m': { name: 'ARY News',    type: 'ary',     url: 'https://live.arynews.tv/',                        referer: 'https://live.arynews.tv/' },
+    'q3n8z1v': { name: 'ARY News 2',  type: 'ary',     url: 'https://live.arynews.tv/',                        referer: 'https://live.arynews.tv/' },
+    'w5r2y9t': { name: 'ARY Musik',   type: 'ary',     url: 'https://live.arymusik.tv/',                       referer: 'https://live.arymusik.tv/' },
+    'a8f4h6j': { name: 'ARY Digital', type: 'ary',     url: 'https://live.arydigital.tv/',                     referer: 'https://live.arydigital.tv/' },
+    'b2c7d9e': { name: 'ARY Zindagi', type: 'ary',     url: 'https://live.aryzindagi.tv/',                     referer: 'https://live.aryzindagi.tv/' },
+    'm4k8n2p': { name: 'ARY Qtv',     type: 'ary',     url: 'https://live.aryqtv.tv/',                         referer: 'https://live.aryqtv.tv/' },
+    's9p4x7w': { name: 'Sony Pal',    type: 'suniliv', channelId: 'sony-pal', jsonUrl: 'https://suniliv.pages.dev/sliv3.json', referer: 'https://suniliv.pages.dev/' }
 };
 
 function findExecutablePath() {
@@ -50,9 +50,41 @@ function findExecutablePath() {
     return null;
 }
 
+async function fetchSunilivStream(channel) {
+    try {
+        console.log(`📄 Fetching ${channel.jsonUrl} for ${channel.channelId}...`);
+        const res = await axios.get(channel.jsonUrl, {
+            headers: {
+                'Referer': channel.referer,
+                'Origin': 'https://suniliv.pages.dev',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
+            },
+            timeout: 20000
+        });
+
+        const item = res.data && res.data[channel.channelId];
+        if (item && item.m3u8) {
+            console.log(`✅ Found m3u8 in sliv3.json for ${channel.channelId}`);
+            return {
+                url: item.m3u8,
+                referer: channel.referer,
+                proxyFallbackUrl: `https://allinonereborn2.online/livtest3/stream_proxy.php?url=${encodeURIComponent(item.m3u8)}`
+            };
+        }
+    } catch (err) {
+        console.warn(`⚠️ sliv3.json fetch failed: ${err.message}`);
+    }
+    return null;
+}
+
 async function fetchFreshUrl(channelKey) {
     const channel = CHANNELS[channelKey];
     if (!channel) return null;
+
+    if (channel.type === 'suniliv') {
+        const directFromJson = await fetchSunilivStream(channel);
+        if (directFromJson) return directFromJson;
+    }
 
     console.log(`🔍 Fetching fresh URL for ${channel.name}...`);
 
@@ -83,8 +115,8 @@ async function fetchFreshUrl(channelKey) {
         let allUrls = [];
 
         const captureM3u8 = (url) => {
-            if (!url) return;
-            if (url.includes('.m3u8') || url.includes('m3u8')) {
+            if (!url || url.includes('stream_proxy.php')) return;
+            if (url.includes('.m3u8')) {
                 allUrls.push(url);
                 if (!m3u8Url) {
                     m3u8Url = url;
@@ -100,7 +132,6 @@ async function fetchFreshUrl(channelKey) {
             }
         };
 
-        // Main page aur sab iframes ki requests/responses pakrein
         page.on('request', (req) => captureM3u8(req.url()));
         page.on('response', (res) => captureM3u8(res.url()));
         page.on('frameattached', (frame) => {
@@ -110,21 +141,18 @@ async function fetchFreshUrl(channelKey) {
 
         console.log(`🌐 Opening ${channel.url}...`);
         await page.goto(channel.url, {
-            waitUntil: 'networkidle2',
+            waitUntil: 'domcontentloaded',
             timeout: 30000
         });
 
-        // Page load hone ke baad thora wait
         await new Promise((r) => setTimeout(r, 2000));
 
-        // Page ko scroll karein
         try {
             await page.evaluate(() => {
                 window.scrollTo(0, document.body.scrollHeight / 2);
             });
         } catch (e) {}
 
-        // Page aur iframes ke andar video/button trigger karein
         const triggerPlayInAllFrames = async () => {
             for (const frame of page.frames()) {
                 try {
@@ -148,27 +176,6 @@ async function fetchFreshUrl(channelKey) {
             }
         };
 
-        const findStreamInFrames = async () => {
-            for (const frame of page.frames()) {
-                try {
-                    const found = await frame.evaluate(() => {
-                        const video = document.querySelector('video');
-                        if (video && (video.currentSrc || video.src)) {
-                            const src = video.currentSrc || video.src;
-                            if (src.includes('.m3u8') || src.startsWith('http')) return src;
-                        }
-                        const source = document.querySelector('video source[src]');
-                        if (source && source.src && source.src.includes('.m3u8')) {
-                            return source.src;
-                        }
-                        return null;
-                    });
-                    if (found && found.includes('.m3u8')) return found;
-                } catch (e) {}
-            }
-            return null;
-        };
-
         await triggerPlayInAllFrames();
 
         console.log(`⏳ Waiting up to 25s for m3u8 URL...`);
@@ -176,30 +183,76 @@ async function fetchFreshUrl(channelKey) {
             await new Promise((r) => setTimeout(r, 1000));
             if (m3u8Url) break;
 
-            const domFound = await findStreamInFrames();
-            if (domFound) {
-                m3u8Url = domFound;
-                break;
-            }
-
-            if (i % 4 === 3) {
+            if (i % 5 === 4) {
                 await triggerPlayInAllFrames();
             }
         }
 
         if (m3u8Url) {
-            console.log(`✅ Got URL for ${channel.name}: ${m3u8Url.substring(0, 120)}...`);
-            return m3u8Url;
+            console.log(`✅ Got URL: ${m3u8Url.substring(0, 100)}...`);
+            return { url: m3u8Url, referer: channel.referer };
         }
 
-        console.log(`❌ No m3u8 URL for ${channel.name}. Captured: ${allUrls.length}`);
+        console.log(`❌ No m3u8 URL for ${channel.name}`);
+        console.log(`   URLs captured: ${allUrls.length}`);
         return null;
     } catch (err) {
-        console.error(`❌ Error for ${channel.name}: ${err.message}`);
+        console.error(`❌ Error: ${err.message}`);
         return null;
     } finally {
         if (browser) await browser.close();
     }
+}
+
+async function fetchPlaylistWithFallback(streamObj, channel) {
+    const headersList = [
+        {
+            'Referer': channel.referer,
+            'Origin': new URL(channel.referer).origin,
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+            'Accept': '*/*'
+        },
+        {
+            'Referer': 'https://allinonereborn2.online/',
+            'Origin': 'https://allinonereborn2.online',
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+            'Accept': '*/*'
+        }
+    ];
+
+    for (const headers of headersList) {
+        try {
+            const res = await axios.get(streamObj.url, {
+                headers,
+                responseType: 'arraybuffer',
+                timeout: 30000,
+                maxRedirects: 5
+            });
+            return { response: res, sourceUrl: streamObj.url, referer: headers.Referer };
+        } catch (err) {
+            if (err.response && err.response.status === 403) {
+                continue;
+            }
+            throw err;
+        }
+    }
+
+    if (streamObj.proxyFallbackUrl) {
+        const res = await axios.get(streamObj.proxyFallbackUrl, {
+            headers: {
+                'Referer': 'https://suniliv.pages.dev/',
+                'Origin': 'https://suniliv.pages.dev',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+                'Accept': '*/*'
+            },
+            responseType: 'arraybuffer',
+            timeout: 30000,
+            maxRedirects: 5
+        });
+        return { response: res, sourceUrl: streamObj.url, referer: 'https://suniliv.pages.dev/' };
+    }
+
+    throw new Error('Request failed with status code 403');
 }
 
 app.get('/', (req, res) => {
@@ -218,9 +271,9 @@ app.get('/:code', async (req, res, next) => {
     }
 
     console.log(`✅ Request: ${channel.name}`);
-    const channelUrl = await fetchFreshUrl(code);
+    const streamObj = await fetchFreshUrl(code);
 
-    if (!channelUrl) {
+    if (!streamObj || !streamObj.url) {
         return res.status(503).json({
             error: 'Stream unavailable',
             channel: channel.name
@@ -228,35 +281,25 @@ app.get('/:code', async (req, res, next) => {
     }
 
     try {
-        const response = await axios.get(channelUrl, {
-            headers: {
-                'Referer': channel.referer,
-                'Origin': new URL(channel.referer).origin,
-                'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
-                'Accept': '*/*'
-            },
-            responseType: 'arraybuffer',
-            timeout: 30000,
-            maxRedirects: 5
-        });
+        const { response, sourceUrl, referer } = await fetchPlaylistWithFallback(streamObj, channel);
 
         const contentType = response.headers['content-type'] || 'application/vnd.apple.mpegurl';
         res.set('Content-Type', contentType);
         res.set('Access-Control-Allow-Origin', '*');
 
         let text = Buffer.from(response.data).toString('utf-8');
-        const baseUrl = channelUrl.substring(0, channelUrl.lastIndexOf('/') + 1);
+        const baseUrl = sourceUrl.substring(0, sourceUrl.lastIndexOf('/') + 1);
         const proxyBase = `https://${req.get('host')}/proxy`;
 
         text = text.split('\n').map((line) => {
             const trimmed = line.trim();
             if (trimmed && !trimmed.startsWith('#')) {
                 const fullUrl = trimmed.startsWith('http') ? trimmed : baseUrl + trimmed;
-                return `${proxyBase}?url=${encodeURIComponent(fullUrl)}&referer=${encodeURIComponent(channel.referer)}&key=${SECRET_KEY}`;
+                return `${proxyBase}?url=${encodeURIComponent(fullUrl)}&referer=${encodeURIComponent(referer)}&key=${SECRET_KEY}`;
             }
             return line.replace(/URI="([^"]+)"/g, (match, uri) => {
                 const fullUrl = uri.startsWith('http') ? uri : baseUrl + uri;
-                return `URI="${proxyBase}?url=${encodeURIComponent(fullUrl)}&referer=${encodeURIComponent(channel.referer)}&key=${SECRET_KEY}"`;
+                return `URI="${proxyBase}?url=${encodeURIComponent(fullUrl)}&referer=${encodeURIComponent(referer)}&key=${SECRET_KEY}"`;
             });
         }).join('\n');
 
@@ -274,7 +317,7 @@ app.get('/proxy', async (req, res) => {
     }
 
     const targetUrl = req.query.url;
-    const referer = req.query.referer || 'https://aryzap.com/';
+    const referer = req.query.referer || 'https://suniliv.pages.dev/';
 
     if (!targetUrl) return res.status(400).json({ error: 'url required' });
 
