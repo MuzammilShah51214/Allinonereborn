@@ -1,9 +1,38 @@
 const express = require('express');
+const fs = require('fs');
 const puppeteer = require('puppeteer');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const TARGET_URL = 'https://suniliv.pages.dev/pworld?id=sony-pal';
+const PUBLIC_BASE_URL = process.env.PUBLIC_URL || 'https://allinonereborn-production.up.railway.app';
+const DEFAULT_CHANNEL_ID = process.env.CHANNEL_ID || 'sony-pal';
+
+function buildTargetUrl(channelId) {
+  const cleanId = String(channelId || DEFAULT_CHANNEL_ID).trim();
+  return `https://suniliv.pages.dev/pworld?id=${encodeURIComponent(cleanId)}`;
+}
+
+function findExecutablePath() {
+  if (process.env.PUPPETEER_EXECUTABLE_PATH && fs.existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)) {
+    return process.env.PUPPETEER_EXECUTABLE_PATH;
+  }
+
+  const candidates = [
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    '/run/current-system/sw/bin/chromium'
+  ];
+
+  for (const p of candidates) {
+    if (fs.existsSync(p)) {
+      return p;
+    }
+  }
+
+  return null;
+}
 
 let browserInstance = null;
 
@@ -12,8 +41,11 @@ async function getBrowser() {
     return browserInstance;
   }
 
+  const executablePath = findExecutablePath();
+
   browserInstance = await puppeteer.launch({
     headless: 'new',
+    ...(executablePath ? { executablePath } : {}),
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
@@ -67,7 +99,6 @@ async function extractM3u8Url(targetUrl) {
       timeout: 30000
     });
 
-    // Agar stream thori der baad load hoti hai to 6 seconds tak wait karein
     const startTime = Date.now();
     while (!foundM3u8 && Date.now() - startTime < 6000) {
       const domStream = await page.evaluate(() => {
@@ -94,37 +125,49 @@ async function extractM3u8Url(targetUrl) {
 }
 
 app.get('/', (req, res) => {
+  const channelId = req.query.id || DEFAULT_CHANNEL_ID;
   res.json({
     status: 'running',
-    target: TARGET_URL,
-    stream_endpoint: '/play.m3u8',
-    info_endpoint: '/stream-info'
+    base_url: PUBLIC_BASE_URL,
+    channel_id: channelId,
+    target: buildTargetUrl(channelId),
+    m3u8_url: `${PUBLIC_BASE_URL}/play.m3u8?id=${encodeURIComponent(channelId)}`,
+    info_url: `${PUBLIC_BASE_URL}/stream-info?id=${encodeURIComponent(channelId)}`
   });
 });
 
 app.get('/stream-info', async (req, res) => {
+  const channelId = req.query.id || DEFAULT_CHANNEL_ID;
+  const targetUrl = buildTargetUrl(channelId);
   try {
-    const m3u8Url = await extractM3u8Url(TARGET_URL);
+    const m3u8Url = await extractM3u8Url(targetUrl);
     if (!m3u8Url) {
-      return res.status(404).json({ error: 'M3U8 stream nahi mila' });
+      return res.status(404).json({ error: 'M3U8 stream nahi mila', channel_id: channelId, target: targetUrl });
     }
-    res.json({ source: TARGET_URL, m3u8: m3u8Url });
+    res.json({
+      base_url: PUBLIC_BASE_URL,
+      channel_id: channelId,
+      source: targetUrl,
+      m3u8: m3u8Url,
+      proxy_m3u8: `${PUBLIC_BASE_URL}/play.m3u8?id=${encodeURIComponent(channelId)}`
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Direct M3U8 stream ke tour par open karne ke liye
 app.get('/play.m3u8', async (req, res) => {
+  const channelId = req.query.id || DEFAULT_CHANNEL_ID;
+  const targetUrl = buildTargetUrl(channelId);
   try {
-    const m3u8Url = await extractM3u8Url(TARGET_URL);
+    const m3u8Url = await extractM3u8Url(targetUrl);
     if (!m3u8Url) {
       return res.status(404).send('M3U8 stream not found');
     }
 
     const upstream = await fetch(m3u8Url, {
       headers: {
-        'Referer': TARGET_URL,
+        'Referer': targetUrl,
         'User-Agent':
           'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
       }
@@ -137,7 +180,6 @@ app.get('/play.m3u8', async (req, res) => {
     const body = await upstream.text();
     const baseUrl = new URL(m3u8Url);
 
-    // Relative segment/playlist links ko full URLs mein convert karein taake player mein chal sakein
     const rewrittenPlaylist = body
       .split('\n')
       .map((line) => {
@@ -160,5 +202,5 @@ app.get('/play.m3u8', async (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Server listening on port ${PORT}`);
+  console.log(`Server running at ${PUBLIC_BASE_URL} on port ${PORT} (default channel: ${DEFAULT_CHANNEL_ID})`);
 });
