@@ -1,110 +1,164 @@
 const express = require('express');
 const puppeteer = require('puppeteer');
-const https = require('https');
 
 const app = express();
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 3000;
+const TARGET_URL = 'https://suniliv.pages.dev/pworld?id=sony-pal';
 
-async function getFreshStreamUrl(channelId) {
-    let browser;
-    try {
-        browser = await puppeteer.launch({
-            headless: "new",
-            args: [
-                '--no-sandbox', 
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-gpu',
-                '--single-process',
-                '--no-zygote'
-            ]
-        });
-        
-        const page = await browser.newPage();
-        
-        // Browser jesa behavior dikhane ke liye User Agent set karein
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+let browserInstance = null;
 
-        let m3u8Url = null;
+async function getBrowser() {
+  if (browserInstance && browserInstance.connected) {
+    return browserInstance;
+  }
 
-        await page.setRequestInterception(true);
-        page.on('request', (request) => {
-            const url = request.url();
-            if (url.includes('.m3u8') && url.includes('hdntl=')) {
-                m3u8Url = url;
-            }
-            request.continue();
-        });
+  browserInstance = await puppeteer.launch({
+    headless: 'new',
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
+      '--no-zygote',
+      '--single-process',
+      '--autoplay-policy=no-user-gesture-required'
+    ]
+  });
 
-        const targetUrl = `https://suniliv.pages.dev/pworld?id=${channelId}`;
-        console.log(`🌐 Opening: ${targetUrl}`);
-
-        // Page load karein (Network idle 2 ka wait karein)
-        await page.goto(targetUrl, { 
-            waitUntil: 'networkidle2', 
-            timeout: 60000 
-        });
-        
-        console.log("Page loaded. Trying to trigger video...");
-
-        // Page ke andar video ya play button ko click karne ki koshish karein
-        try {
-            // JW Player ka play button (agar ho to click karein)
-            await page.evaluate(() => {
-                const video = document.querySelector('video');
-                if (video) {
-                    video.play().catch(e => console.log('Video play failed'));
-                }
-                const playBtn = document.querySelector('.jw-icon-display');
-                if (playBtn) playBtn.click();
-            });
-        } catch (e) {
-            console.log("Click attempt failed, but continuing...");
-        }
-
-        // Ab thoda zyada wait karein (15 seconds) taake token zaroor generate ho jaye
-        await new Promise(r => setTimeout(r, 15000)); 
-        
-        await browser.close();
-        
-        return m3u8Url;
-    } catch (error) {
-        console.error("Puppeteer Error:", error.message);
-        if (browser) await browser.close();
-        throw error;
-    }
+  return browserInstance;
 }
 
-app.get('/:channel.m3u8', async (req, res) => {
-    const channelId = req.params.channel; 
-    console.log(`📺 Player ne "${channelId}" channel ki request ki...`);
-    
-    try {
-        const realUrl = await getFreshStreamUrl(channelId);
-        
-        if (!realUrl) {
-            console.log("❌ Stream URL nahi mila! (Bot protection ya time out)");
-            return res.status(404).send(`Channel "${channelId}" ka link nahi mila. Page load hua lekin stream token nahi bana.`);
-        }
+async function extractM3u8Url(targetUrl) {
+  const browser = await getBrowser();
+  const page = await browser.newPage();
 
-        console.log(`✅ Stream URL Mil Gaya: ${realUrl}`);
+  let foundM3u8 = null;
 
-        https.get(realUrl, (streamRes) => {
-            res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
-            streamRes.pipe(res);
-        }).on('error', (err) => {
-            res.status(500).send("Error fetching stream");
-        });
+  await page.setUserAgent(
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
+  );
 
-    } catch (error) {
-        res.status(500).send("Error: " + error.message);
+  await page.setRequestInterception(true);
+
+  page.on('request', (req) => {
+    const url = req.url();
+    if (!foundM3u8 && url.includes('.m3u8')) {
+      foundM3u8 = url;
     }
-});
+
+    const resourceType = req.resourceType();
+    if (['image', 'font', 'stylesheet'].includes(resourceType)) {
+      req.abort();
+    } else {
+      req.continue();
+    }
+  });
+
+  page.on('response', (res) => {
+    const url = res.url();
+    if (!foundM3u8 && url.includes('.m3u8')) {
+      foundM3u8 = url;
+    }
+  });
+
+  try {
+    await page.goto(targetUrl, {
+      waitUntil: 'networkidle2',
+      timeout: 30000
+    });
+
+    // Agar stream thori der baad load hoti hai to 6 seconds tak wait karein
+    const startTime = Date.now();
+    while (!foundM3u8 && Date.now() - startTime < 6000) {
+      const domStream = await page.evaluate(() => {
+        const video = document.querySelector('video');
+        if (video && video.src && video.src.includes('.m3u8')) {
+          return video.src;
+        }
+        const source = document.querySelector('video source[src*=".m3u8"]');
+        return source ? source.src : null;
+      });
+
+      if (domStream) {
+        foundM3u8 = domStream;
+        break;
+      }
+
+      await new Promise((r) => setTimeout(r, 500));
+    }
+
+    return foundM3u8;
+  } finally {
+    await page.close();
+  }
+}
 
 app.get('/', (req, res) => {
-    res.send("Stream server chal raha hai. URL mein channel ka naam dalein, jaise: /sab-hd.m3u8");
+  res.json({
+    status: 'running',
+    target: TARGET_URL,
+    stream_endpoint: '/play.m3u8',
+    info_endpoint: '/stream-info'
+  });
+});
+
+app.get('/stream-info', async (req, res) => {
+  try {
+    const m3u8Url = await extractM3u8Url(TARGET_URL);
+    if (!m3u8Url) {
+      return res.status(404).json({ error: 'M3U8 stream nahi mila' });
+    }
+    res.json({ source: TARGET_URL, m3u8: m3u8Url });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Direct M3U8 stream ke tour par open karne ke liye
+app.get('/play.m3u8', async (req, res) => {
+  try {
+    const m3u8Url = await extractM3u8Url(TARGET_URL);
+    if (!m3u8Url) {
+      return res.status(404).send('M3U8 stream not found');
+    }
+
+    const upstream = await fetch(m3u8Url, {
+      headers: {
+        'Referer': TARGET_URL,
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
+      }
+    });
+
+    if (!upstream.ok) {
+      return res.redirect(302, m3u8Url);
+    }
+
+    const body = await upstream.text();
+    const baseUrl = new URL(m3u8Url);
+
+    // Relative segment/playlist links ko full URLs mein convert karein taake player mein chal sakein
+    const rewrittenPlaylist = body
+      .split('\n')
+      .map((line) => {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) return line;
+        try {
+          return new URL(trimmed, baseUrl).toString();
+        } catch {
+          return line;
+        }
+      })
+      .join('\n');
+
+    res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.send(rewrittenPlaylist);
+  } catch (err) {
+    res.status(500).send(`Error: ${err.message}`);
+  }
 });
 
 app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+  console.log(`Server listening on port ${PORT}`);
 });
