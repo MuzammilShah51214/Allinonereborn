@@ -3,15 +3,22 @@ const puppeteer = require('puppeteer');
 const https = require('https');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 
-// Puppeteer chalane ka function (Channel Name leta hai)
 async function getFreshStreamUrl(channelId) {
     let browser;
     try {
+        // Railway ke liye Chrome ko stable banaya gaya hai
         browser = await puppeteer.launch({
             headless: "new",
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+            args: [
+                '--no-sandbox', 
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--single-process',
+                '--no-zygote'
+            ]
         });
         
         const page = await browser.newPage();
@@ -20,13 +27,14 @@ async function getFreshStreamUrl(channelId) {
         await page.setRequestInterception(true);
         page.on('request', (request) => {
             const url = request.url();
+            // Stream link pakadne ka logic
             if (url.includes('.m3u8') && url.includes('hdntl=')) {
                 m3u8Url = url;
             }
             request.continue();
         });
 
-        // Yahan hum dynamic channel ID use kar rahe hain
+        // Aapka diya hua exact link yahan hai
         const targetUrl = `https://suniliv.pages.dev/pworld?id=${channelId}`;
         console.log(`🌐 Opening: ${targetUrl}`);
 
@@ -35,30 +43,32 @@ async function getFreshStreamUrl(channelId) {
             timeout: 60000 
         });
         
-        await new Promise(r => setTimeout(r, 10000)); // Wait for player to generate token
+        // 12 second wait taake JW Player load ho kar token generate kar sake
+        await new Promise(r => setTimeout(r, 12000)); 
         await browser.close();
+        
         return m3u8Url;
     } catch (error) {
+        console.error("Puppeteer Error:", error.message);
         if (browser) await browser.close();
         throw error;
     }
 }
 
-// API Endpoint jo URL se channel name uthayega
-// Example: /sab-hd.m3u8 ya /star-plus.m3u8
 app.get('/:channel.m3u8', async (req, res) => {
     const channelId = req.params.channel; 
     console.log(`📺 Player ne "${channelId}" channel ki request ki...`);
     
     try {
-        // Us channel ka fresh stream link nikalain
         const realUrl = await getFreshStreamUrl(channelId);
         
         if (!realUrl) {
+            console.log("❌ Stream URL nahi mila!");
             return res.status(404).send(`Channel "${channelId}" ka link nahi mila.`);
         }
 
-        // Player ko m3u8 file bhej dein
+        console.log(`✅ Stream URL Mil Gaya: ${realUrl}`);
+
         https.get(realUrl, (streamRes) => {
             res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
             streamRes.pipe(res);
@@ -67,7 +77,6 @@ app.get('/:channel.m3u8', async (req, res) => {
         });
 
     } catch (error) {
-        console.error("Error:", error);
         res.status(500).send("Error: " + error.message);
     }
 });
