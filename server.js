@@ -1,212 +1,314 @@
 const express = require('express');
+const cors = require('cors');
+const axios = require('axios');
 const fs = require('fs');
 const { execSync } = require('child_process');
 const puppeteer = require('puppeteer');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
-const PUBLIC_BASE_URL = process.env.PUBLIC_URL || 'https://allinonereborn-production.up.railway.app';
-const DEFAULT_CHANNEL_ID = process.env.CHANNEL_ID || 'sony-pal';
+app.use(cors());
 
-function buildTargetUrl(channelId) {
-  const cleanId = String(channelId || DEFAULT_CHANNEL_ID).trim();
-  return `https://suniliv.pages.dev/pworld?id=${encodeURIComponent(cleanId)}`;
-}
+const PORT = process.env.PORT || 3000;
+
+// 🔐 SECURITY KEY
+const SECRET_KEY = 'MUZAMMIL2026ARY';
+
+const CHANNELS = {
+    'k7x9p2m': { name: 'ARY News',    url: 'https://live.arynews.tv/',                referer: 'https://live.arynews.tv/' },
+    'q3n8z1v': { name: 'ARY News 2',  url: 'https://live.arynews.tv/',                referer: 'https://live.arynews.tv/' },
+    'w5r2y9t': { name: 'ARY Musik',   url: 'https://live.arymusik.tv/',               referer: 'https://live.arymusik.tv/' },
+    'a8f4h6j': { name: 'ARY Digital', url: 'https://live.arydigital.tv/',             referer: 'https://live.arydigital.tv/' },
+    'b2c7d9e': { name: 'ARY Zindagi', url: 'https://live.aryzindagi.tv/',             referer: 'https://live.aryzindagi.tv/' },
+    'm4k8n2p': { name: 'ARY Qtv',     url: 'https://live.aryqtv.tv/',                 referer: 'https://live.aryqtv.tv/' },
+    's9p4x7w': { name: 'Sony Pal',    url: 'https://suniliv.pages.dev/pworld?id=sony-pal', referer: 'https://suniliv.pages.dev/' }
+};
 
 function findExecutablePath() {
-  if (process.env.PUPPETEER_EXECUTABLE_PATH && fs.existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)) {
-    return process.env.PUPPETEER_EXECUTABLE_PATH;
-  }
+    if (process.env.PUPPETEER_EXECUTABLE_PATH && fs.existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)) {
+        return process.env.PUPPETEER_EXECUTABLE_PATH;
+    }
 
-  const candidates = [
-    '/usr/bin/chromium',
-    '/usr/bin/chromium-browser',
-    '/usr/bin/google-chrome',
-    '/usr/bin/google-chrome-stable'
-  ];
+    const candidates = [
+        '/usr/bin/chromium',
+        '/usr/bin/chromium-browser',
+        '/usr/bin/google-chrome',
+        '/usr/bin/google-chrome-stable'
+    ];
 
-  for (const p of candidates) {
-    if (fs.existsSync(p)) return p;
-  }
+    for (const p of candidates) {
+        if (fs.existsSync(p)) return p;
+    }
 
-  try {
-    const found = execSync('which chromium chromium-browser google-chrome 2>/dev/null || true')
-      .toString()
-      .trim()
-      .split('\n')[0];
-    if (found && fs.existsSync(found)) return found;
-  } catch {}
+    try {
+        const found = execSync('which chromium chromium-browser google-chrome 2>/dev/null || true')
+            .toString()
+            .trim()
+            .split('\n')[0];
+        if (found && fs.existsSync(found)) return found;
+    } catch (e) {}
 
-  return null;
+    return null;
 }
 
-let browserInstance = null;
+async function fetchFreshUrl(channelKey) {
+    const channel = CHANNELS[channelKey];
+    if (!channel) return null;
 
-async function getBrowser() {
-  if (browserInstance && browserInstance.connected) {
-    return browserInstance;
-  }
+    console.log(`🔍 Fetching fresh URL for ${channel.name}...`);
 
-  const executablePath = findExecutablePath();
+    let browser;
+    try {
+        const executablePath = findExecutablePath();
 
-  browserInstance = await puppeteer.launch({
-    headless: 'new',
-    ...(executablePath ? { executablePath } : {}),
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-gpu',
-      '--no-zygote',
-      '--single-process',
-      '--autoplay-policy=no-user-gesture-required'
-    ]
-  });
+        browser = await puppeteer.launch({
+            headless: 'new',
+            ...(executablePath ? { executablePath } : {}),
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--single-process',
+                '--disable-web-security',
+                '--autoplay-policy=no-user-gesture-required'
+            ]
+        });
 
-  return browserInstance;
-}
+        const page = await browser.newPage();
+        await page.setUserAgent('Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36');
 
-async function extractM3u8Url(targetUrl) {
-  const browser = await getBrowser();
-  const page = await browser.newPage();
+        // Har request aur response ko capture karein
+        let m3u8Url = null;
+        let allUrls = [];
 
-  let foundM3u8 = null;
+        const captureM3u8 = (url) => {
+            if (!url || !url.includes('.m3u8')) return;
+            allUrls.push(url);
+            if (!m3u8Url) {
+                m3u8Url = url;
+            }
+            if (url.includes('main.m3u8') || url.includes('playlist.m3u8') || url.includes('master.m3u8')) {
+                m3u8Url = url;
+            }
+        };
 
-  await page.setUserAgent(
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
-  );
+        page.on('request', (req) => {
+            captureM3u8(req.url());
+        });
 
-  await page.setRequestInterception(true);
+        page.on('response', (res) => {
+            captureM3u8(res.url());
+        });
 
-  page.on('request', (req) => {
-    const url = req.url();
-    if (!foundM3u8 && url.includes('.m3u8')) {
-      foundM3u8 = url;
-    }
+        console.log(`🌐 Opening ${channel.url}...`);
+        await page.goto(channel.url, {
+            waitUntil: 'domcontentloaded',
+            timeout: 30000
+        });
 
-    const resourceType = req.resourceType();
-    if (['image', 'font', 'stylesheet'].includes(resourceType)) {
-      req.abort();
-    } else {
-      req.continue();
-    }
-  });
+        // Page load hone ka wait
+        await new Promise(r => setTimeout(r, 2000));
 
-  page.on('response', (res) => {
-    const url = res.url();
-    if (!foundM3u8 && url.includes('.m3u8')) {
-      foundM3u8 = url;
-    }
-  });
+        // Page ko scroll karein
+        try {
+            await page.evaluate(() => {
+                window.scrollTo(0, document.body.scrollHeight / 2);
+            });
+        } catch (e) {}
 
-  try {
-    await page.goto(targetUrl, {
-      waitUntil: 'networkidle2',
-      timeout: 30000
-    });
+        // Videos aur buttons play karne ki koshish
+        try {
+            await page.evaluate(() => {
+                document.querySelectorAll('video').forEach(v => {
+                    v.muted = true;
+                    v.play().catch(() => {});
+                });
 
-    const startTime = Date.now();
-    while (!foundM3u8 && Date.now() - startTime < 6000) {
-      const domStream = await page.evaluate(() => {
-        const video = document.querySelector('video');
-        if (video && video.src && video.src.includes('.m3u8')) {
-          return video.src;
+                const buttons = document.querySelectorAll('button, [role="button"], .play, .play-button, [class*="play"]');
+                buttons.forEach(b => {
+                    try {
+                        const text = (b.textContent || '').toLowerCase();
+                        if (text.includes('play') || text === '') {
+                            b.click();
+                        }
+                    } catch (e) {}
+                });
+            });
+        } catch (e) {}
+
+        // 25 second tak wait karein
+        console.log(`⏳ Waiting up to 25s for m3u8 URL...`);
+        for (let i = 0; i < 25; i++) {
+            await new Promise(r => setTimeout(r, 1000));
+            if (m3u8Url) break;
+
+            if (!m3u8Url) {
+                try {
+                    const domM3u8 = await page.evaluate(() => {
+                        const video = document.querySelector('video');
+                        if (video && video.src && video.src.includes('.m3u8')) return video.src;
+                        const source = document.querySelector('video source[src*=".m3u8"]');
+                        return source ? source.src : null;
+                    });
+                    if (domM3u8) m3u8Url = domM3u8;
+                } catch (e) {}
+            }
+
+            if (m3u8Url) break;
+
+            if (i % 5 === 4) {
+                try {
+                    await page.evaluate(() => {
+                        document.querySelectorAll('video').forEach(v => {
+                            v.muted = true;
+                            v.play().catch(() => {});
+                        });
+                    });
+                } catch (e) {}
+            }
         }
-        const source = document.querySelector('video source[src*=".m3u8"]');
-        return source ? source.src : null;
-      });
 
-      if (domStream) {
-        foundM3u8 = domStream;
-        break;
-      }
+        if (m3u8Url) {
+            console.log(`✅ Got URL: ${m3u8Url.substring(0, 100)}...`);
+            return m3u8Url;
+        } else {
+            console.log(`❌ No m3u8 URL for ${channel.name}`);
+            console.log(`   URLs captured: ${allUrls.length}`);
+            return null;
+        }
 
-      await new Promise((r) => setTimeout(r, 500));
+    } catch (err) {
+        console.error(`❌ Error: ${err.message}`);
+        return null;
+    } finally {
+        if (browser) await browser.close();
     }
-
-    return foundM3u8;
-  } finally {
-    await page.close();
-  }
 }
 
 app.get('/', (req, res) => {
-  const channelId = req.query.id || DEFAULT_CHANNEL_ID;
-  res.json({
-    status: 'running',
-    base_url: PUBLIC_BASE_URL,
-    channel_id: channelId,
-    target: buildTargetUrl(channelId),
-    m3u8_url: `${PUBLIC_BASE_URL}/play.m3u8?id=${encodeURIComponent(channelId)}`,
-    info_url: `${PUBLIC_BASE_URL}/stream-info?id=${encodeURIComponent(channelId)}`
-  });
+    res.json({ status: 'ok', message: 'ARY Proxy running' });
 });
 
-app.get('/stream-info', async (req, res) => {
-  const channelId = req.query.id || DEFAULT_CHANNEL_ID;
-  const targetUrl = buildTargetUrl(channelId);
-  try {
-    const m3u8Url = await extractM3u8Url(targetUrl);
-    if (!m3u8Url) {
-      return res.status(404).json({ error: 'M3U8 stream nahi mila', channel_id: channelId, target: targetUrl });
+app.get('/:code', async (req, res, next) => {
+    const code = req.params.code.replace(/\.m3u8$/i, '');
+    const channel = CHANNELS[code];
+
+    if (!channel) return next();
+
+    const providedKey = req.query.key;
+    if (!providedKey || providedKey !== SECRET_KEY) {
+        return res.status(403).json({ error: 'Forbidden' });
     }
-    res.json({
-      base_url: PUBLIC_BASE_URL,
-      channel_id: channelId,
-      source: targetUrl,
-      m3u8: m3u8Url,
-      proxy_m3u8: `${PUBLIC_BASE_URL}/play.m3u8?id=${encodeURIComponent(channelId)}`
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+
+    console.log(`✅ Request: ${channel.name}`);
+    const channelUrl = await fetchFreshUrl(code);
+
+    if (!channelUrl) {
+        return res.status(503).json({
+            error: 'Stream unavailable',
+            channel: channel.name
+        });
+    }
+
+    try {
+        const response = await axios.get(channelUrl, {
+            headers: {
+                'Referer': channel.referer,
+                'Origin': new URL(channel.referer).origin,
+                'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+                'Accept': '*/*'
+            },
+            responseType: 'arraybuffer',
+            timeout: 30000,
+            maxRedirects: 5
+        });
+
+        const contentType = response.headers['content-type'] || 'application/vnd.apple.mpegurl';
+        res.set('Content-Type', contentType);
+        res.set('Access-Control-Allow-Origin', '*');
+
+        let text = Buffer.from(response.data).toString('utf-8');
+        const baseUrl = channelUrl.substring(0, channelUrl.lastIndexOf('/') + 1);
+        const proxyBase = `https://${req.get('host')}/proxy`;
+
+        text = text.split('\n').map(line => {
+            const trimmed = line.trim();
+            if (trimmed && !trimmed.startsWith('#')) {
+                const fullUrl = trimmed.startsWith('http') ? trimmed : baseUrl + trimmed;
+                return `${proxyBase}?url=${encodeURIComponent(fullUrl)}&referer=${encodeURIComponent(channel.referer)}&key=${SECRET_KEY}`;
+            }
+            return line.replace(/URI="([^"]+)"/g, (match, uri) => {
+                const fullUrl = uri.startsWith('http') ? uri : baseUrl + uri;
+                return `URI="${proxyBase}?url=${encodeURIComponent(fullUrl)}&referer=${encodeURIComponent(channel.referer)}&key=${SECRET_KEY}"`;
+            });
+        }).join('\n');
+
+        res.send(text);
+    } catch (err) {
+        console.error(`❌ Proxy error: ${err.message}`);
+        res.status(500).json({ error: err.message });
+    }
 });
 
-app.get('/play.m3u8', async (req, res) => {
-  const channelId = req.query.id || DEFAULT_CHANNEL_ID;
-  const targetUrl = buildTargetUrl(channelId);
-  try {
-    const m3u8Url = await extractM3u8Url(targetUrl);
-    if (!m3u8Url) {
-      return res.status(404).send('M3U8 stream not found');
+app.get('/proxy', async (req, res) => {
+    const providedKey = req.query.key;
+    if (providedKey && providedKey !== SECRET_KEY) {
+        return res.status(403).json({ error: 'Forbidden' });
     }
 
-    const upstream = await fetch(m3u8Url, {
-      headers: {
-        'Referer': targetUrl,
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
-      }
-    });
+    const targetUrl = req.query.url;
+    const referer = req.query.referer || 'https://aryzap.com/';
 
-    if (!upstream.ok) {
-      return res.redirect(302, m3u8Url);
-    }
+    if (!targetUrl) return res.status(400).json({ error: 'url required' });
 
-    const body = await upstream.text();
-    const baseUrl = new URL(m3u8Url);
+    try {
+        const response = await axios.get(targetUrl, {
+            headers: {
+                'Referer': referer,
+                'Origin': new URL(referer).origin,
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Accept': '*/*'
+            },
+            responseType: 'arraybuffer',
+            timeout: 30000,
+            maxRedirects: 5
+        });
 
-    const rewrittenPlaylist = body
-      .split('\n')
-      .map((line) => {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith('#')) return line;
-        try {
-          return new URL(trimmed, baseUrl).toString();
-        } catch {
-          return line;
+        const contentType = response.headers['content-type'] || 'application/octet-stream';
+        res.set('Content-Type', contentType);
+        res.set('Access-Control-Allow-Origin', '*');
+
+        let data = response.data;
+
+        if (targetUrl.includes('.m3u8') || contentType.includes('mpegurl')) {
+            let text = Buffer.from(data).toString('utf-8');
+            const baseUrl = targetUrl.substring(0, targetUrl.lastIndexOf('/') + 1);
+            const proxyBase = `https://${req.get('host')}/proxy`;
+
+            text = text.split('\n').map(line => {
+                const trimmed = line.trim();
+                if (trimmed && !trimmed.startsWith('#')) {
+                    const fullUrl = trimmed.startsWith('http') ? trimmed : baseUrl + trimmed;
+                    return `${proxyBase}?url=${encodeURIComponent(fullUrl)}&referer=${encodeURIComponent(referer)}&key=${SECRET_KEY}`;
+                }
+                return line.replace(/URI="([^"]+)"/g, (match, uri) => {
+                    const fullUrl = uri.startsWith('http') ? uri : baseUrl + uri;
+                    return `URI="${proxyBase}?url=${encodeURIComponent(fullUrl)}&referer=${encodeURIComponent(referer)}&key=${SECRET_KEY}"`;
+                });
+            }).join('\n');
+
+            return res.send(text);
         }
-      })
-      .join('\n');
 
-    res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.send(rewrittenPlaylist);
-  } catch (err) {
-    res.status(500).send(`Error: ${err.message}`);
-  }
+        res.send(data);
+    } catch (err) {
+        console.error('Proxy error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
 });
 
 app.listen(PORT, () => {
-  console.log(`Server running at ${PUBLIC_BASE_URL} on port ${PORT} (default channel: ${DEFAULT_CHANNEL_ID})`);
+    console.log(`✅ ARY Proxy on port ${PORT}`);
+    console.log(`🔐 Key: ${SECRET_KEY}`);
+    console.log(`🔒 HTTPS enforced`);
 });
