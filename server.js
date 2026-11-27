@@ -21,7 +21,7 @@ const CHANNELS = {
     'b2c7d9e': { name: 'ARY Zindagi',  type: 'ary',     url: 'https://live.aryzindagi.tv/',                         referer: 'https://live.aryzindagi.tv/' },
     'm4k8n2p': { name: 'ARY Qtv',      type: 'ary',     url: 'https://live.aryqtv.tv/',                             referer: 'https://live.aryqtv.tv/' },
     's9p4x7w': { name: 'Sony Pal',     type: 'suniliv', channelId: 'sony-pal', jsonUrl: 'https://suniliv.pages.dev/sliv3.json', referer: 'https://suniliv.pages.dev/' },
-    'h4s8t2m': { name: 'Hum Sitaray',  type: 'tamasha', url: 'https://tamashaweb.com/live-tv?channel=hum-sitaray-live', referer: 'https://tamashaweb.com/' }
+    'h4s8t2m': { name: 'Hum Sitaray',  type: 'tamasha', slug: 'hum-sitaray-live', url: 'https://tamashaweb.com/live-tv?channel=hum-sitaray-live', referer: 'https://tamashaweb.com/' }
 };
 
 function getBaseProxyUrl(req) {
@@ -83,6 +83,31 @@ async function fetchSunilivStream(channel) {
     return null;
 }
 
+function scoreStreamUrl(url, channel) {
+    const lower = url.toLowerCase();
+    let score = 0;
+
+    if (channel.type === 'tamasha') {
+        if (lower.includes('hum-sitaray') || lower.includes('humsitaray') || lower.includes('sitaray')) {
+            score += 100;
+        }
+        if (lower.includes('hum') && lower.includes('live')) {
+            score += 30;
+        }
+    }
+
+    if (
+        lower.includes('main.m3u8') ||
+        lower.includes('playlist.m3u8') ||
+        lower.includes('master.m3u8') ||
+        lower.includes('index.m3u8')
+    ) {
+        score += 20;
+    }
+
+    return score;
+}
+
 async function fetchFreshUrl(channelKey) {
     const channel = CHANNELS[channelKey];
     if (!channel) return null;
@@ -117,7 +142,8 @@ async function fetchFreshUrl(channelKey) {
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
         );
 
-        let m3u8Url = null;
+        let bestM3u8Url = null;
+        let bestScore = -1;
         let m3u8Referer = channel.referer;
         let allUrls = [];
 
@@ -126,17 +152,11 @@ async function fetchFreshUrl(channelKey) {
             if (url.includes('.m3u8') || url.includes('m3u8')) {
                 allUrls.push(url);
                 const reqReferer = headers['referer'] || headers['Referer'] || channel.referer;
-                if (!m3u8Url) {
-                    m3u8Url = url;
-                    m3u8Referer = reqReferer;
-                }
-                if (
-                    url.includes('main.m3u8') ||
-                    url.includes('playlist.m3u8') ||
-                    url.includes('master.m3u8') ||
-                    url.includes('index.m3u8')
-                ) {
-                    m3u8Url = url;
+                const score = scoreStreamUrl(url, channel);
+
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestM3u8Url = url;
                     m3u8Referer = reqReferer;
                 }
             }
@@ -155,7 +175,7 @@ async function fetchFreshUrl(channelKey) {
             timeout: 30000
         });
 
-        await new Promise((r) => setTimeout(r, 2500));
+        await new Promise((r) => setTimeout(r, 3000));
 
         try {
             await page.evaluate(() => {
@@ -201,22 +221,32 @@ async function fetchFreshUrl(channelKey) {
                         }
                         return null;
                     });
-                    if (found && found.includes('.m3u8')) return found;
+                    if (found && found.includes('.m3u8')) {
+                        captureM3u8(found);
+                    }
                 } catch (e) {}
             }
-            return null;
         };
 
         await triggerPlayInAllFrames();
 
         console.log(`⏳ Waiting up to 25s for m3u8 URL...`);
+        let foundAtSecond = null;
+
         for (let i = 0; i < 25; i++) {
             await new Promise((r) => setTimeout(r, 1000));
-            if (m3u8Url) break;
+            await findStreamInFrames();
 
-            const domFound = await findStreamInFrames();
-            if (domFound) {
-                m3u8Url = domFound;
+            if (bestM3u8Url && foundAtSecond === null) {
+                foundAtSecond = i;
+            }
+
+            // Tamasha ke liye agar pehla channel aa gaya ho to 6s tak wait karein
+            // ke kahin hum-sitaray ka stream baad mein aaye
+            if (bestM3u8Url) {
+                if (channel.type === 'tamasha' && bestScore < 100 && (i - foundAtSecond) < 6) {
+                    continue;
+                }
                 break;
             }
 
@@ -225,9 +255,9 @@ async function fetchFreshUrl(channelKey) {
             }
         }
 
-        if (m3u8Url) {
-            console.log(`✅ Got URL for ${channel.name}: ${m3u8Url.substring(0, 120)}...`);
-            return { url: m3u8Url, referer: m3u8Referer || channel.referer };
+        if (bestM3u8Url) {
+            console.log(`✅ Got URL for ${channel.name} (score ${bestScore}): ${bestM3u8Url.substring(0, 120)}...`);
+            return { url: bestM3u8Url, referer: m3u8Referer || channel.referer };
         }
 
         console.log(`❌ No m3u8 URL for ${channel.name}. Captured: ${allUrls.length}`);
