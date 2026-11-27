@@ -13,6 +13,10 @@ const PORT = process.env.PORT || 3000;
 // 🔐 SECURITY KEY
 const SECRET_KEY = 'MUZAMMIL2026ARY';
 
+// ⚡ URL Cache (8 minutes)
+const CACHE_TTL_MS = 8 * 60 * 1000;
+const streamCache = new Map();
+
 const CHANNELS = {
     'k7x9p2m': { name: 'ARY News',     type: 'ary',     url: 'https://live.arynews.tv/',                            referer: 'https://live.arynews.tv/' },
     'q3n8z1v': { name: 'ARY News 2',   type: 'ary',     url: 'https://live.arynews.tv/',                            referer: 'https://live.arynews.tv/' },
@@ -23,6 +27,28 @@ const CHANNELS = {
     's9p4x7w': { name: 'Sony Pal',     type: 'suniliv', channelId: 'sony-pal', jsonUrl: 'https://suniliv.pages.dev/sliv3.json', referer: 'https://suniliv.pages.dev/' },
     'h4s8t2m': { name: 'Hum Sitaray',  type: 'tamasha', slug: 'hum-sitaray-live', url: 'https://tamashaweb.com/live-tv?channel=hum-sitaray-live', referer: 'https://tamashaweb.com/' }
 };
+
+function getCachedStream(channelKey) {
+    const entry = streamCache.get(channelKey);
+    if (!entry) return null;
+    if (Date.now() > entry.expiresAt) {
+        streamCache.delete(channelKey);
+        return null;
+    }
+    return entry.data;
+}
+
+function setCachedStream(channelKey, data) {
+    if (!data || !data.url) return;
+    streamCache.set(channelKey, {
+        data,
+        expiresAt: Date.now() + CACHE_TTL_MS
+    });
+}
+
+function clearCachedStream(channelKey) {
+    streamCache.delete(channelKey);
+}
 
 function getBaseProxyUrl(req) {
     const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
@@ -83,7 +109,7 @@ async function fetchSunilivStream(channel) {
     return null;
 }
 
-function scoreStreamUrl(url, channel) {
+function scoreStreamUrl(url, channel, clickedTargetChannel = false) {
     const lower = url.toLowerCase();
     let score = 0;
 
@@ -92,7 +118,10 @@ function scoreStreamUrl(url, channel) {
             score += 100;
         }
         if (lower.includes('hum') && lower.includes('live')) {
-            score += 30;
+            score += 40;
+        }
+        if (clickedTargetChannel) {
+            score += 25;
         }
     }
 
@@ -102,10 +131,43 @@ function scoreStreamUrl(url, channel) {
         lower.includes('master.m3u8') ||
         lower.includes('index.m3u8')
     ) {
-        score += 20;
+        score += 15;
     }
 
     return score;
+}
+
+async function selectTamashaChannel(page) {
+    try {
+        return await page.evaluate(() => {
+            const targets = ['hum-sitaray-live', 'hum-sitaray', 'hum sitaray', 'sitaray'];
+
+            const links = Array.from(document.querySelectorAll('a[href]'));
+            for (const a of links) {
+                const href = (a.getAttribute('href') || '').toLowerCase();
+                const text = (a.innerText || a.textContent || '').toLowerCase();
+                if (targets.some((t) => href.includes(t) || text.includes(t))) {
+                    a.scrollIntoView({ block: 'center' });
+                    a.click();
+                    return true;
+                }
+            }
+
+            const clickables = Array.from(document.querySelectorAll('button, [role="button"], div, span, li, p'));
+            for (const el of clickables) {
+                const text = (el.innerText || el.textContent || '').trim().toLowerCase();
+                if (text.length > 0 && text.length < 80 && targets.some((t) => text.includes(t))) {
+                    el.scrollIntoView({ block: 'center' });
+                    el.click();
+                    return true;
+                }
+            }
+
+            return false;
+        });
+    } catch (e) {
+        return false;
+    }
 }
 
 async function fetchFreshUrl(channelKey) {
@@ -146,15 +208,16 @@ async function fetchFreshUrl(channelKey) {
         let bestScore = -1;
         let m3u8Referer = channel.referer;
         let allUrls = [];
+        let clickedTargetChannel = false;
 
         const captureM3u8 = (url, headers = {}) => {
             if (!url || url.includes('stream_proxy.php')) return;
             if (url.includes('.m3u8') || url.includes('m3u8')) {
                 allUrls.push(url);
                 const reqReferer = headers['referer'] || headers['Referer'] || channel.referer;
-                const score = scoreStreamUrl(url, channel);
+                const score = scoreStreamUrl(url, channel, clickedTargetChannel);
 
-                if (score > bestScore) {
+                if (score >= bestScore) {
                     bestScore = score;
                     bestM3u8Url = url;
                     m3u8Referer = reqReferer;
@@ -172,10 +235,18 @@ async function fetchFreshUrl(channelKey) {
         console.log(`🌐 Opening ${channel.url}...`);
         await page.goto(channel.url, {
             waitUntil: 'domcontentloaded',
-            timeout: 30000
+            timeout: 25000
         });
 
         await new Promise((r) => setTimeout(r, 3000));
+
+        if (channel.type === 'tamasha') {
+            clickedTargetChannel = await selectTamashaChannel(page);
+            if (clickedTargetChannel) {
+                console.log(`🎯 Clicked Hum Sitaray element on Tamasha`);
+                await new Promise((r) => setTimeout(r, 1500));
+            }
+        }
 
         try {
             await page.evaluate(() => {
@@ -230,21 +301,23 @@ async function fetchFreshUrl(channelKey) {
 
         await triggerPlayInAllFrames();
 
-        console.log(`⏳ Waiting up to 25s for m3u8 URL...`);
+        console.log(`⏳ Waiting up to 22s for m3u8 URL...`);
         let foundAtSecond = null;
 
-        for (let i = 0; i < 25; i++) {
+        for (let i = 0; i < 22; i++) {
             await new Promise((r) => setTimeout(r, 1000));
             await findStreamInFrames();
+
+            if (channel.type === 'tamasha' && !clickedTargetChannel && i === 4) {
+                clickedTargetChannel = await selectTamashaChannel(page);
+            }
 
             if (bestM3u8Url && foundAtSecond === null) {
                 foundAtSecond = i;
             }
 
-            // Tamasha ke liye agar pehla channel aa gaya ho to 6s tak wait karein
-            // ke kahin hum-sitaray ka stream baad mein aaye
             if (bestM3u8Url) {
-                if (channel.type === 'tamasha' && bestScore < 100 && (i - foundAtSecond) < 6) {
+                if (channel.type === 'tamasha' && bestScore < 100 && (i - foundAtSecond) < 8) {
                     continue;
                 }
                 break;
@@ -270,6 +343,22 @@ async function fetchFreshUrl(channelKey) {
     }
 }
 
+async function getStreamWithCache(channelKey, forceRefresh = false) {
+    if (!forceRefresh) {
+        const cached = getCachedStream(channelKey);
+        if (cached) {
+            console.log(`⚡ Cache hit for ${CHANNELS[channelKey].name}`);
+            return cached;
+        }
+    }
+
+    const fresh = await fetchFreshUrl(channelKey);
+    if (fresh && fresh.url) {
+        setCachedStream(channelKey, fresh);
+    }
+    return fresh;
+}
+
 async function fetchPlaylistWithFallback(streamObj, channel) {
     const primaryReferer = streamObj.referer || channel.referer;
     const headersList = [
@@ -292,7 +381,7 @@ async function fetchPlaylistWithFallback(streamObj, channel) {
             const res = await axios.get(streamObj.url, {
                 headers,
                 responseType: 'arraybuffer',
-                timeout: 30000,
+                timeout: 25000,
                 maxRedirects: 5
             });
             return { response: res, sourceUrl: streamObj.url, referer: headers.Referer };
@@ -313,7 +402,7 @@ async function fetchPlaylistWithFallback(streamObj, channel) {
                 'Accept': '*/*'
             },
             responseType: 'arraybuffer',
-            timeout: 30000,
+            timeout: 25000,
             maxRedirects: 5
         });
         return { response: res, sourceUrl: streamObj.url, referer: 'https://suniliv.pages.dev/' };
@@ -323,7 +412,7 @@ async function fetchPlaylistWithFallback(streamObj, channel) {
 }
 
 app.get('/', (req, res) => {
-    res.json({ status: 'ok', message: 'ARY Proxy running' });
+    res.json({ status: 'ok', message: 'ARY Proxy running', cacheTtlSec: CACHE_TTL_MS / 1000 });
 });
 
 app.get('/:code', async (req, res, next) => {
@@ -337,8 +426,10 @@ app.get('/:code', async (req, res, next) => {
         return res.status(403).json({ error: 'Forbidden' });
     }
 
-    console.log(`✅ Request: ${channel.name}`);
-    const streamObj = await fetchFreshUrl(code);
+    const forceRefresh = req.query.refresh === '1';
+    console.log(`✅ Request: ${channel.name}${forceRefresh ? ' (force refresh)' : ''}`);
+
+    let streamObj = await getStreamWithCache(code, forceRefresh);
 
     if (!streamObj || !streamObj.url) {
         return res.status(503).json({
@@ -348,7 +439,22 @@ app.get('/:code', async (req, res, next) => {
     }
 
     try {
-        const { response, sourceUrl, referer } = await fetchPlaylistWithFallback(streamObj, channel);
+        let fetched;
+        try {
+            fetched = await fetchPlaylistWithFallback(streamObj, channel);
+        } catch (firstErr) {
+            if (!forceRefresh) {
+                console.warn(`⚠️ Cached stream failed (${firstErr.message}), refreshing...`);
+                clearCachedStream(code);
+                streamObj = await getStreamWithCache(code, true);
+                if (!streamObj || !streamObj.url) throw firstErr;
+                fetched = await fetchPlaylistWithFallback(streamObj, channel);
+            } else {
+                throw firstErr;
+            }
+        }
+
+        const { response, sourceUrl, referer } = fetched;
 
         const contentType = response.headers['content-type'] || 'application/vnd.apple.mpegurl';
         res.set('Content-Type', contentType);
@@ -372,6 +478,7 @@ app.get('/:code', async (req, res, next) => {
 
         res.send(text);
     } catch (err) {
+        clearCachedStream(code);
         console.error(`❌ Proxy error: ${err.message}`);
         res.status(500).json({ error: err.message });
     }
@@ -397,7 +504,7 @@ app.get('/proxy', async (req, res) => {
                 'Accept': '*/*'
             },
             responseType: 'arraybuffer',
-            timeout: 30000,
+            timeout: 25000,
             maxRedirects: 5
         });
 
