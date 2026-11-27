@@ -1,12 +1,14 @@
 [phases.setup]
-nixPkgs = ["nodejs_20", "chromium", "nss", "freetype", "harfbuzz", "ca-certificates", "ttf-freefont"]
+nixPkgs = ["nodejs_20", "nss", "freetype", "harfbuzz", "ca-certificates", "ttf-freefont"]
 
 [phases.install]
-cmds = ["npm install"]
+cmds = [
+  "npm install",
+  "PUPPETEER_CACHE_DIR=/app/.cache/puppeteer npx puppeteer browsers install chrome"
+]
 
 [variables]
-PUPPETEER_SKIP_CHROMIUM_DOWNLOAD = "true"
-PUPPETEER_EXECUTABLE_PATH = "/usr/bin/chromium"
+PUPPETEER_CACHE_DIR = "/app/.cache/puppeteer"
 
 [start]
 cmd = "npm start"
