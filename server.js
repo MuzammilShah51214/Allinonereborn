@@ -14,13 +14,13 @@ const PORT = process.env.PORT || 3000;
 const SECRET_KEY = 'MUZAMMIL2026ARY';
 
 const CHANNELS = {
-    'k7x9p2m': { name: 'ARY News',    url: 'https://live.arynews.tv/',                referer: 'https://live.arynews.tv/' },
-    'q3n8z1v': { name: 'ARY News 2',  url: 'https://live.arynews.tv/',                referer: 'https://live.arynews.tv/' },
-    'w5r2y9t': { name: 'ARY Musik',   url: 'https://live.arymusik.tv/',               referer: 'https://live.arymusik.tv/' },
-    'a8f4h6j': { name: 'ARY Digital', url: 'https://live.arydigital.tv/',             referer: 'https://live.arydigital.tv/' },
-    'b2c7d9e': { name: 'ARY Zindagi', url: 'https://live.aryzindagi.tv/',             referer: 'https://live.aryzindagi.tv/' },
-    'm4k8n2p': { name: 'ARY Qtv',     url: 'https://live.aryqtv.tv/',                 referer: 'https://live.aryqtv.tv/' },
-    's9p4x7w': { name: 'Sony Pal',    url: 'https://suniliv.pages.dev/pworld?id=sony-pal', referer: 'https://suniliv.pages.dev/' }
+    'k7x9p2m': { name: 'ARY News',    url: 'https://live.arynews.tv/',                        referer: 'https://live.arynews.tv/' },
+    'q3n8z1v': { name: 'ARY News 2',  url: 'https://live.arynews.tv/',                        referer: 'https://live.arynews.tv/' },
+    'w5r2y9t': { name: 'ARY Musik',   url: 'https://live.arymusik.tv/',                       referer: 'https://live.arymusik.tv/' },
+    'a8f4h6j': { name: 'ARY Digital', url: 'https://live.arydigital.tv/',                     referer: 'https://live.arydigital.tv/' },
+    'b2c7d9e': { name: 'ARY Zindagi', url: 'https://live.aryzindagi.tv/',                     referer: 'https://live.aryzindagi.tv/' },
+    'm4k8n2p': { name: 'ARY Qtv',     url: 'https://live.aryqtv.tv/',                         referer: 'https://live.aryqtv.tv/' },
+    's9p4x7w': { name: 'Sony Pal',    url: 'https://suniliv.pages.dev/pworld?id=sony-pal',     referer: 'https://suniliv.pages.dev/' }
 };
 
 function findExecutablePath() {
@@ -75,39 +75,47 @@ async function fetchFreshUrl(channelKey) {
         });
 
         const page = await browser.newPage();
-        await page.setUserAgent('Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36');
+        await page.setUserAgent(
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
+        );
 
-        // Har request aur response ko capture karein
         let m3u8Url = null;
         let allUrls = [];
 
         const captureM3u8 = (url) => {
-            if (!url || !url.includes('.m3u8')) return;
-            allUrls.push(url);
-            if (!m3u8Url) {
-                m3u8Url = url;
-            }
-            if (url.includes('main.m3u8') || url.includes('playlist.m3u8') || url.includes('master.m3u8')) {
-                m3u8Url = url;
+            if (!url) return;
+            if (url.includes('.m3u8') || url.includes('m3u8')) {
+                allUrls.push(url);
+                if (!m3u8Url) {
+                    m3u8Url = url;
+                }
+                if (
+                    url.includes('main.m3u8') ||
+                    url.includes('playlist.m3u8') ||
+                    url.includes('master.m3u8') ||
+                    url.includes('index.m3u8')
+                ) {
+                    m3u8Url = url;
+                }
             }
         };
 
-        page.on('request', (req) => {
-            captureM3u8(req.url());
-        });
-
-        page.on('response', (res) => {
-            captureM3u8(res.url());
+        // Main page aur sab iframes ki requests/responses pakrein
+        page.on('request', (req) => captureM3u8(req.url()));
+        page.on('response', (res) => captureM3u8(res.url()));
+        page.on('frameattached', (frame) => {
+            frame.on('request', (req) => captureM3u8(req.url()));
+            frame.on('response', (res) => captureM3u8(res.url()));
         });
 
         console.log(`🌐 Opening ${channel.url}...`);
         await page.goto(channel.url, {
-            waitUntil: 'domcontentloaded',
+            waitUntil: 'networkidle2',
             timeout: 30000
         });
 
-        // Page load hone ka wait
-        await new Promise(r => setTimeout(r, 2000));
+        // Page load hone ke baad thora wait
+        await new Promise((r) => setTimeout(r, 2000));
 
         // Page ko scroll karein
         try {
@@ -116,69 +124,78 @@ async function fetchFreshUrl(channelKey) {
             });
         } catch (e) {}
 
-        // Videos aur buttons play karne ki koshish
-        try {
-            await page.evaluate(() => {
-                document.querySelectorAll('video').forEach(v => {
-                    v.muted = true;
-                    v.play().catch(() => {});
-                });
-
-                const buttons = document.querySelectorAll('button, [role="button"], .play, .play-button, [class*="play"]');
-                buttons.forEach(b => {
-                    try {
-                        const text = (b.textContent || '').toLowerCase();
-                        if (text.includes('play') || text === '') {
-                            b.click();
-                        }
-                    } catch (e) {}
-                });
-            });
-        } catch (e) {}
-
-        // 25 second tak wait karein
-        console.log(`⏳ Waiting up to 25s for m3u8 URL...`);
-        for (let i = 0; i < 25; i++) {
-            await new Promise(r => setTimeout(r, 1000));
-            if (m3u8Url) break;
-
-            if (!m3u8Url) {
+        // Page aur iframes ke andar video/button trigger karein
+        const triggerPlayInAllFrames = async () => {
+            for (const frame of page.frames()) {
                 try {
-                    const domM3u8 = await page.evaluate(() => {
-                        const video = document.querySelector('video');
-                        if (video && video.src && video.src.includes('.m3u8')) return video.src;
-                        const source = document.querySelector('video source[src*=".m3u8"]');
-                        return source ? source.src : null;
-                    });
-                    if (domM3u8) m3u8Url = domM3u8;
-                } catch (e) {}
-            }
-
-            if (m3u8Url) break;
-
-            if (i % 5 === 4) {
-                try {
-                    await page.evaluate(() => {
-                        document.querySelectorAll('video').forEach(v => {
+                    await frame.evaluate(() => {
+                        document.querySelectorAll('video').forEach((v) => {
                             v.muted = true;
                             v.play().catch(() => {});
+                        });
+
+                        const buttons = document.querySelectorAll('button, [role="button"], .play, .play-button, [class*="play"]');
+                        buttons.forEach((b) => {
+                            try {
+                                const text = (b.textContent || '').toLowerCase();
+                                if (text.includes('play') || text === '') {
+                                    b.click();
+                                }
+                            } catch (e) {}
                         });
                     });
                 } catch (e) {}
             }
+        };
+
+        const findStreamInFrames = async () => {
+            for (const frame of page.frames()) {
+                try {
+                    const found = await frame.evaluate(() => {
+                        const video = document.querySelector('video');
+                        if (video && (video.currentSrc || video.src)) {
+                            const src = video.currentSrc || video.src;
+                            if (src.includes('.m3u8') || src.startsWith('http')) return src;
+                        }
+                        const source = document.querySelector('video source[src]');
+                        if (source && source.src && source.src.includes('.m3u8')) {
+                            return source.src;
+                        }
+                        return null;
+                    });
+                    if (found && found.includes('.m3u8')) return found;
+                } catch (e) {}
+            }
+            return null;
+        };
+
+        await triggerPlayInAllFrames();
+
+        console.log(`⏳ Waiting up to 25s for m3u8 URL...`);
+        for (let i = 0; i < 25; i++) {
+            await new Promise((r) => setTimeout(r, 1000));
+            if (m3u8Url) break;
+
+            const domFound = await findStreamInFrames();
+            if (domFound) {
+                m3u8Url = domFound;
+                break;
+            }
+
+            if (i % 4 === 3) {
+                await triggerPlayInAllFrames();
+            }
         }
 
         if (m3u8Url) {
-            console.log(`✅ Got URL: ${m3u8Url.substring(0, 100)}...`);
+            console.log(`✅ Got URL for ${channel.name}: ${m3u8Url.substring(0, 120)}...`);
             return m3u8Url;
-        } else {
-            console.log(`❌ No m3u8 URL for ${channel.name}`);
-            console.log(`   URLs captured: ${allUrls.length}`);
-            return null;
         }
 
+        console.log(`❌ No m3u8 URL for ${channel.name}. Captured: ${allUrls.length}`);
+        return null;
     } catch (err) {
-        console.error(`❌ Error: ${err.message}`);
+        console.error(`❌ Error for ${channel.name}: ${err.message}`);
         return null;
     } finally {
         if (browser) await browser.close();
@@ -231,7 +248,7 @@ app.get('/:code', async (req, res, next) => {
         const baseUrl = channelUrl.substring(0, channelUrl.lastIndexOf('/') + 1);
         const proxyBase = `https://${req.get('host')}/proxy`;
 
-        text = text.split('\n').map(line => {
+        text = text.split('\n').map((line) => {
             const trimmed = line.trim();
             if (trimmed && !trimmed.startsWith('#')) {
                 const fullUrl = trimmed.startsWith('http') ? trimmed : baseUrl + trimmed;
@@ -285,7 +302,7 @@ app.get('/proxy', async (req, res) => {
             const baseUrl = targetUrl.substring(0, targetUrl.lastIndexOf('/') + 1);
             const proxyBase = `https://${req.get('host')}/proxy`;
 
-            text = text.split('\n').map(line => {
+            text = text.split('\n').map((line) => {
                 const trimmed = line.trim();
                 if (trimmed && !trimmed.startsWith('#')) {
                     const fullUrl = trimmed.startsWith('http') ? trimmed : baseUrl + trimmed;
