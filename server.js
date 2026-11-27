@@ -23,6 +23,11 @@ const CHANNELS = {
     's9p4x7w': { name: 'Sony Pal',    type: 'suniliv', channelId: 'sony-pal', jsonUrl: 'https://suniliv.pages.dev/sliv3.json', referer: 'https://suniliv.pages.dev/' }
 };
 
+function getBaseProxyUrl(req) {
+    const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+    return `${proto}://${req.get('host')}/proxy`;
+}
+
 function findExecutablePath() {
     if (process.env.PUPPETEER_EXECUTABLE_PATH && fs.existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)) {
         return process.env.PUPPETEER_EXECUTABLE_PATH;
@@ -289,7 +294,7 @@ app.get('/:code', async (req, res, next) => {
 
         let text = Buffer.from(response.data).toString('utf-8');
         const baseUrl = sourceUrl.substring(0, sourceUrl.lastIndexOf('/') + 1);
-        const proxyBase = `https://${req.get('host')}/proxy`;
+        const proxyBase = getBaseProxyUrl(req);
 
         text = text.split('\n').map((line) => {
             const trimmed = line.trim();
@@ -343,7 +348,7 @@ app.get('/proxy', async (req, res) => {
         if (targetUrl.includes('.m3u8') || contentType.includes('mpegurl')) {
             let text = Buffer.from(data).toString('utf-8');
             const baseUrl = targetUrl.substring(0, targetUrl.lastIndexOf('/') + 1);
-            const proxyBase = `https://${req.get('host')}/proxy`;
+            const proxyBase = getBaseProxyUrl(req);
 
             text = text.split('\n').map((line) => {
                 const trimmed = line.trim();
@@ -362,8 +367,9 @@ app.get('/proxy', async (req, res) => {
 
         res.send(data);
     } catch (err) {
-        console.error('Proxy error:', err.message);
-        res.status(500).json({ error: err.message });
+        const status = err.response && err.response.status ? err.response.status : 500;
+        console.error(`❌ Proxy error (${status}) for ${targetUrl}: ${err.message}`);
+        res.status(status).json({ error: err.message, status });
     }
 });
 
