@@ -1,5 +1,6 @@
 const express = require('express');
 const fs = require('fs');
+const { execSync } = require('child_process');
 const puppeteer = require('puppeteer');
 
 const app = express();
@@ -21,15 +22,20 @@ function findExecutablePath() {
     '/usr/bin/chromium',
     '/usr/bin/chromium-browser',
     '/usr/bin/google-chrome',
-    '/usr/bin/google-chrome-stable',
-    '/run/current-system/sw/bin/chromium'
+    '/usr/bin/google-chrome-stable'
   ];
 
   for (const p of candidates) {
-    if (fs.existsSync(p)) {
-      return p;
-    }
+    if (fs.existsSync(p)) return p;
   }
+
+  try {
+    const found = execSync('which chromium chromium-browser google-chrome 2>/dev/null || true')
+      .toString()
+      .trim()
+      .split('\n')[0];
+    if (found && fs.existsSync(found)) return found;
+  } catch {}
 
   return null;
 }
@@ -67,7 +73,7 @@ async function extractM3u8Url(targetUrl) {
   let foundM3u8 = null;
 
   await page.setUserAgent(
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
   );
 
   await page.setRequestInterception(true);
@@ -169,7 +175,7 @@ app.get('/play.m3u8', async (req, res) => {
       headers: {
         'Referer': targetUrl,
         'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
       }
     });
 
